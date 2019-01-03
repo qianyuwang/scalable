@@ -30,19 +30,20 @@ parser.add_argument("--threads", type=int, default=0, help="Number of threads fo
 parser.add_argument("--momentum", default=0.9, type=float, help="Momentum, Default: 0.9")
 parser.add_argument("--weight-decay", "--wd", default=0, type=float, help="weight decay, Default: 0")
 parser.add_argument("--pretrained", default="", type=str, help="path to pretrained model (default: none)")
-parser.add_argument("--seed", type=int, default=None, help="random seed")
-
+parser.add_argument("--seed", type=int, default=3435, help="random seed")
+parser.add_argument("--dataset", default="nus-wide-object", type=str, help="choose a dataset, default nus-wide-object")
 def main():
     global opt, model, training_data_loader, testing_data_loader
+
     opt = parser.parse_args()
     print(opt)
 
     cuda = opt.cuda
     if cuda and not torch.cuda.is_available():
         raise Exception("No GPU found, please run without --cuda")
-
-    opt.seed = random.randint(1, 10000)
-    print("Random Seed: ", opt.seed)
+    if not opt.seed:
+        opt.seed = random.randint(1, 10000)
+        print("Random Seed: ", opt.seed)
     torch.manual_seed(opt.seed)
     if cuda:
         torch.cuda.manual_seed(opt.seed)
@@ -51,32 +52,19 @@ def main():
 
     print("===> Loading datasets")
     if opt.is_debug:
-        path_train = '/home/wqy/Documents/MvADL-master/nus_train.csv'
-        path_test = '/home/wqy/Documents/MvADL-master/nus_test.csv'
         training_data_loader = torch.utils.data.DataLoader(
-            FeaList(rootsrc = path_train, roottgt=None,
+            FeaList(rootsrc = '', dataset = opt.dataset, roottgt=None,
                       transform=None),
             batch_size=opt.batchSize, shuffle=True)
 
         testing_data_loader = torch.utils.data.DataLoader(
-            FeaList(rootsrc = path_test, roottgt=None,
+            FeaList(rootsrc = '',dataset = opt.dataset,  roottgt=None,
                       transform=None,is_test = True),
             batch_size=opt.testBatchSize, shuffle=False)
 
-    else:
-        path_src = '/home/wqy/Documents/MvADL-master/usps.csv'
-        training_data_loader = torch.utils.data.DataLoader(
-            FeaList(rootsrc=path_src, roottgt=None,
-                    transform=None),
-            batch_size=opt.batchSize, shuffle=True)
-
-        testing_data_loader = torch.utils.data.DataLoader(
-            FeaList(rootsrc=path_src, roottgt=None,
-                    transform=None, is_test=True),
-            batch_size=opt.testBatchSize, shuffle=False)
 
     print("===> Building model")
-    model = ADLnet(input_dim1 = 64, input_dim2 = 31)
+    model = ADLnet(dataset = 'nus-wide-object')
     model._initialize_weights()
     #criterion = nn.CrossEntropyLoss()
     #criterion = nn.MSELoss()
@@ -122,6 +110,7 @@ def train(optimizer, criterion, epoch):
         print("epoch =", epoch, "lr =", optimizer.param_groups[0]["lr"])
     model.train()
     nums = 0.0
+    total = 0.0
     for iteration, batch in enumerate(training_data_loader, 1):
         input, target = batch[0], batch[1]
         if opt.cuda:
@@ -133,6 +122,7 @@ def train(optimizer, criterion, epoch):
         #_, target_id = torch.max(target, 1)
         target_id =target
         nums += target_id.eq(predict_id.data).cpu().sum().float()
+        total += input.shape[0]
         loss = criterion(output, target)
         epoch_loss += loss.item()
 
@@ -149,8 +139,7 @@ def train(optimizer, criterion, epoch):
             print(loss_record)
     epoch_loss_record = "===>Training Epoch [{}] Complete: Avg. Entropy Loss: {:.10f}, acc {:.4f}".format(epoch,
                                                                                                           epoch_loss / len(training_data_loader),
-                                                                        nums/(len(training_data_loader)*opt.batchSize)
-                                                                                                   )
+                                                                        nums/total)
     with open("train_loss_log.txt", "a") as train_log_file:
         train_log_file.write(epoch_loss_record + '\n')
     if epoch % 50 == 0:
@@ -159,6 +148,7 @@ def train(optimizer, criterion, epoch):
 
 def test(epoch):
     nums = 0.0
+    total = 0.0
     model.eval()
     print("===> Testing")
     with torch.no_grad():
@@ -177,8 +167,8 @@ def test(epoch):
             # print('target', target_id)
             # use eq func to calculate multiple
             nums = nums + target_id.eq(predict_id.data).cpu().sum().float()
-
-        test_loss_record = "===>Testing Epoch[{}] ACC: {:.4f}".format(epoch,nums / (opt.testBatchSize *len(testing_data_loader)))
+            total += input.shape[0]
+        test_loss_record = "===>Testing Epoch[{}] ACC: {:.4f}".format(epoch,nums/total)
         print(test_loss_record)
         with open("test_loss_log.txt", "a") as test_log_file:
             test_log_file.write(test_loss_record + '\n')
